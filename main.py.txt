@@ -1,0 +1,108 @@
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message
+from aiogram.filters import CommandStart
+from aiogram.enums import ContentType
+
+from config import BOT_TOKEN, CHANNEL_ID, ADMIN_GROUP_ID
+from database import init_db, save_ticket
+from ai_handler import analyze_news
+
+logging.basicConfig(level=logging.INFO)
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+@dp.message(CommandStart())
+async def start_handler(message: Message):
+    await message.answer(
+        "???? ??\n"
+        "????? ?????? ?? ????? (???? ??? ?? ????).\n"
+        "??? ??? ??? ????? ???? ?? ????? ?????? ??????."
+    )
+
+@dp.message(F.content_type.in_({
+    ContentType.TEXT, 
+    ContentType.PHOTO, 
+    ContentType.VIDEO, 
+    ContentType.DOCUMENT
+}))
+async def report_handler(message: Message):
+    user = message.from_user
+    text = message.text or message.caption or ""
+    content_type = message.content_type
+    file_id = None
+
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        content_type = "photo"
+    elif message.video:
+        file_id = message.video.file_id
+        content_type = "video"
+    elif message.document:
+        file_id = message.document.file_id
+        content_type = "document"
+
+    await message.answer("? ????? ??? ??? ??.\n?? ??? ?????...")
+
+    has_media = file_id is not None
+    ai_result = await analyze_news(text, has_media=has_media)
+    is_important = ai_result["is_important"]
+    summary = ai_result["summary"]
+
+    ticket_id = await save_ticket(
+        user_id=user.id,
+        username=user.username,
+        full_name=user.full_name,
+        content_type=content_type,
+        text_content=text,
+        file_id=file_id,
+        is_important=is_important,
+        ai_summary=summary
+    )
+
+    if is_important and summary:
+        caption = f"{summary}"
+
+        try:
+            if content_type == "photo":
+                await bot.send_photo(CHANNEL_ID, photo=file_id, caption=caption)
+            elif content_type == "video":
+                await bot.send_video(CHANNEL_ID, video=file_id, caption=caption)
+            else:
+                await bot.send_message(CHANNEL_ID, text=caption)
+
+            await message.answer("?? ??? ??? ????? ???? ?? ? ?? ????? ????? ??.")
+        except Exception as e:
+            print("Channel error:", e)
+            await message.answer("??? ?? ??????. ?? ????? ????? ???? ??.")
+    else:
+        await message.answer("????? ??? ??? ?? ? ?? ??? ????? ????? ?????.")
+
+    admin_text = (
+        f"?? ???? #{ticket_id}\n"
+        f"?? {user.full_name}\n"
+        f"?? `{user.id}`\n"
+        f"?? ???: {'???' if is_important else '???'}\n"
+        f"?? {text or '(???? ???)'}"
+    )
+    if summary:
+        admin_text += f"\n\n?? ?????:\n{summary}"
+
+    try:
+        if file_id and content_type == "photo":
+            await bot.send_photo(ADMIN_GROUP_ID, photo=file_id, caption=admin_text)
+        elif file_id and content_type == "video":
+            await bot.send_video(ADMIN_GROUP_ID, video=file_id, caption=admin_text)
+        else:
+            await bot.send_message(ADMIN_GROUP_ID, admin_text)
+    except Exception as e:
+        print("Admin group error:", e)
+
+async def main():
+    await init_db()
+    print("???? ???? ??")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
