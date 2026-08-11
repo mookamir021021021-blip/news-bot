@@ -28,7 +28,7 @@ class ReportState(StatesGroup):
 def user_main_keyboard():
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📝 ثبت گزارش جدید")],
+            [KeyboardButton(text="📝 ثبت تیکت جدید")],
             [KeyboardButton(text="📋 وضعیت تیکت‌های من"), KeyboardButton(text="ℹ️ راهنما")],
         ],
         resize_keyboard=True
@@ -38,7 +38,7 @@ def user_main_keyboard():
 def admin_main_keyboard():
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📝 ثبت گزارش جدید")],
+            [KeyboardButton(text="📝 ثبت تیکت جدید")],
             [KeyboardButton(text="📋 وضعیت تیکت‌های من"), KeyboardButton(text="ℹ️ راهنما")],
             [KeyboardButton(text="⚙️ پنل ادمین")],
         ],
@@ -61,7 +61,7 @@ async def start_handler(message: Message, state: FSMContext):
     
     welcome_text = (
         "سلام 👋\n\n"
-        "به ربات گزارش خبری خوش اومدید.\n"
+        "به ربات پشتیبانی نیوز پلاس خوش اومدید.\n"
         "از دکمه‌های زیر استفاده کنید:"
     )
     
@@ -75,7 +75,7 @@ async def start_handler(message: Message, state: FSMContext):
 async def help_handler(message: Message):
     text = (
         "📖 راهنمای استفاده از ربات:\n\n"
-        "۱. روی دکمه «ثبت گزارش جدید» بزنید\n"
+        "۱. روی دکمه «ثبت تیکت جدید» بزنید\n"
         "۲. متن، عکس یا فیلم گزارش خود را ارسال کنید\n"
         "۳. گزارش شما بررسی می‌شود\n"
         "۴. در صورت تأیید، در کانال منتشر خواهد شد\n\n"
@@ -84,7 +84,7 @@ async def help_handler(message: Message):
     await message.answer(text)
 
 # ==================== ثبت گزارش جدید ====================
-@dp.message(F.text == "📝 ثبت گزارش جدید")
+@dp.message(F.text == "📝 ثبت تیکت جدید")
 async def new_report_handler(message: Message, state: FSMContext):
     await state.set_state(ReportState.waiting_for_report)
     await message.answer(
