@@ -9,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, CHANNEL_ID, ADMIN_GROUP_ID, ADMIN_IDS
-from database import init_db, save_ticket, get_user_tickets
+from database import init_db, save_ticket, get_user_tickets, update_ticket_status
 from ai_handler import analyze_news
 
 logging.basicConfig(level=logging.INFO)
@@ -215,11 +215,10 @@ async def my_tickets_handler(message: Message):
 
     text = "📋 آخرین تیکت‌های شما:\n\n"
     for t in tickets:
-        status_emoji = "🟢" if t["status"] == "open" else "🔴"
-        important = "⭐" if t["is_important"] else ""
-        text += f"{status_emoji} #{t['id']} | {t['title'] or 'بدون عنوان'} {important}\n"
+        status_emoji = "🟢 باز" if t["status"] == "open" else "🔴 بسته"
+        important = " ⭐" if t["is_important"] else ""
+        text += f"#{t['id']} | {t['title'] or 'بدون عنوان'}{important}\nوضعیت: {status_emoji}\n\n"
 
-    text += "\n🟢 = باز   |   🔴 = بسته"
     await message.answer(text)
 
 # ==================== پنل ادمین ====================
@@ -264,6 +263,7 @@ async def approve_handler(callback: CallbackQuery):
             await callback.message.edit_text(text=new_text, reply_markup=None)
 
         await bot.send_message(ticket["user_id"], f"✅ تیکت #{ticket_id} شما تأیید و در کانال منتشر شد.")
+        await update_ticket_status(ticket_id, "closed")
         await callback.answer("منتشر شد ✅")
     except Exception as e:
         print("Approve error:", e)
@@ -290,6 +290,7 @@ async def reject_handler(callback: CallbackQuery):
         await callback.message.edit_text(text=new_text, reply_markup=None)
 
     await bot.send_message(ticket["user_id"], f"❌ تیکت #{ticket_id} شما رد شد.")
+    await update_ticket_status(ticket_id, "closed")
     await callback.answer("رد شد")
     pending_tickets.pop(ticket_id, None)
 
