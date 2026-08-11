@@ -48,3 +48,11 @@ async def get_user_tickets(user_id, limit=10):
         """, (user_id, limit))
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+async def update_ticket_status(ticket_id, status):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE tickets SET status = ? WHERE id = ?",
+            (status, ticket_id)
+        )
+        await db.commit()
