@@ -76,20 +76,18 @@ async def help_handler(message: Message):
     text = (
         "📖 راهنمای استفاده از ربات:\n\n"
         "۱. روی دکمه «ثبت تیکت جدید» بزنید\n"
-        "۲. متن، عکس یا فیلم گزارش خود را ارسال کنید\n"
-        "۳. گزارش شما بررسی می‌شود\n"
-        "۴. در صورت تأیید، در کانال منتشر خواهد شد\n\n"
-        "❗️ لطفاً فقط اخبار واقعی و مهم ارسال کنید."
+        "۲. متن، عکس یا فیلم مد نظرتون خود را ارسال کنید\n"
+        "۳.تیکت شما بررسی می‌شود\n"
     )
     await message.answer(text)
 
-# ==================== ثبت گزارش جدید ====================
+# ==================== ثبت تیکت جدید ====================
 @dp.message(F.text == "📝 ثبت تیکت جدید")
 async def new_report_handler(message: Message, state: FSMContext):
     await state.set_state(ReportState.waiting_for_report)
     await message.answer(
-        "لطفاً گزارش خود را ارسال کنید:\n"
-        "(می‌توانید متن، عکس یا فیلم بفرستید)\n\n"
+        "لطفاً جزئیات تیکت  خود را ارسال کنید:\n"
+        "(می‌توانید عکس یا فیلم بفرستید)\n\n"
         "برای انصراف روی دکمه «انصراف» بزنید.",
         reply_markup=cancel_keyboard()
     )
@@ -101,7 +99,7 @@ async def cancel_handler(message: Message, state: FSMContext):
     keyboard = admin_main_keyboard() if is_admin else user_main_keyboard()
     await message.answer("عملیات لغو شد.", reply_markup=keyboard)
 
-# ==================== دریافت گزارش ====================
+# ==================== دریافت تیکت ====================
 @dp.message(ReportState.waiting_for_report, F.content_type.in_({
     ContentType.TEXT, ContentType.PHOTO, ContentType.VIDEO, ContentType.DOCUMENT
 }))
@@ -121,7 +119,7 @@ async def process_report(message: Message, state: FSMContext):
         file_id = message.document.file_id
         content_type = "document"
 
-    await message.answer("در حال بررسی گزارش شما...")
+    await message.answer("در حال بررسی تیکت شما...")
 
     has_media = file_id is not None
     ai_result = await analyze_news(text, has_media=has_media)
@@ -181,7 +179,7 @@ async def process_report(message: Message, state: FSMContext):
     main_kb = admin_main_keyboard() if is_admin else user_main_keyboard()
     
     await message.answer(
-        f"✅ گزارش شما با شماره #{ticket_id} ثبت شد و برای بررسی ارسال گردید.",
+        f"✅ تیکت شما با شماره #{ticket_id} ثبت شد و برای بررسی ارسال گردید.",
         reply_markup=main_kb
     )
     await state.clear()
@@ -191,7 +189,7 @@ async def process_report(message: Message, state: FSMContext):
 async def my_tickets_handler(message: Message):
     await message.answer(
         "این بخش به زودی کامل می‌شود.\n"
-        "فعلاً بعد از ثبت گزارش، شماره تیکت به شما داده می‌شود."
+        "فعلاً بعد از ثبت تیکت، شماره تیکت به شما داده می‌شود."
     )
 
 # ==================== پنل ادمین ====================
@@ -269,7 +267,7 @@ async def reject_handler(callback: CallbackQuery):
         else:
             await callback.message.edit_text(text=new_text, reply_markup=None)
 
-        await bot.send_message(ticket["user_id"], f"❌ گزارش #{ticket_id} شما رد شد.")
+        await bot.send_message(ticket["user_id"], f"❌ تیکت #{ticket_id} شما رد شد.")
         await callback.answer("رد شد")
     except Exception as e:
         print("Reject error:", e)
