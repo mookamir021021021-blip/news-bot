@@ -1,23 +1,42 @@
+import re
 from google import genai
 from config import GEMINI_API_KEY
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+DANGER_WORDS = [
+    "حمله",
+    "انفجار",
+    "بمباران",
+    "موشک",
+    "پهپاد",
+    "پدافند",
+    "آژیر",
+    "تیراندازی",
+    "درگیری",
+    "کشته",
+    "زخمی",
+    "میزنن",
+    "می‌زنن",
+    "زیر آتش",
+]
+
 SYSTEM_PROMPT = """
 تو یک سیستم تشخیص خبر فوری برای کانال خبری هستی.
 
-قانون خیلی مهم:
-- هر گزارشی که درباره حمله، بمباران، زدن شهر، صدای انفجار، پدافند، موشک، پهپاد، آژیر، درگیری نظامی، کشته و زخمی باشد → حتماً IMPORTANT: yes
-- حتی اگر جمله ناقص یا محاوره‌ای باشد (مثل «تهران رو دارن می‌زنن» یا «صدای پدافند میاد») باز هم مهم حساب کن
-- فقط وقتی IMPORTANT: no بده که کاملاً واضح باشد حرف شخصی، شایعه بی‌اساس، تبلیغ یا سوال معمولی است
+قوانین:
+
+- هر گزارشی درباره حمله، انفجار، بمباران، موشک، پهپاد، پدافند، تیراندازی، درگیری نظامی، کشته یا زخمی شدن مهم است.
+- جملات ناقص و محاوره‌ای نیز مهم محسوب می‌شوند.
+- فقط زمانی IMPORTANT: no بده که کاملاً مشخص باشد گزارش خبری مهمی نیست.
 
 اگر مهم بود:
-یک کپشن خبری کوتاه، رسمی و جذاب به فارسی بنویس (حداکثر ۸۰ کلمه).
+یک کپشن خبری رسمی، کوتاه و جذاب به فارسی بنویس (حداکثر ۸۰ کلمه).
 
-فرمت جوابت باید دقیقاً این باشد و هیچ چیز دیگری ننویس:
+فقط با این فرمت پاسخ بده:
 
 IMPORTANT: yes
-SUMMARY: متن کپشن اینجا
+SUMMARY: متن خبر
 
 یا
 
@@ -25,43 +44,70 @@ IMPORTANT: no
 SUMMARY: -
 """
 
+
 async def analyze_news(text: str, has_media: bool = False) -> dict:
     user_text = text.strip() if text else "(بدون متن)"
-    
+
+    emergency_match = any(
+        word in user_text.lower()
+        for word in DANGER_WORDS
+    )
+
     prompt = SYSTEM_PROMPT + f"\n\nگزارش کاربر:\n{user_text}"
-    
+
     if has_media:
-        prompt += "\n\n(کاربر عکس یا فیلم هم فرستاده)"
+        prompt += "\n\nکاربر عکس یا ویدیو نیز ارسال کرده است."
 
     try:
         response = client.models.generate_content(
             model="gemini-1.5-flash",
             contents=prompt
         )
-        result_text = response.text.strip().lower()
 
-        is_important = "important: yes" in result_text
-        
+        raw_text = response.text.strip()
+
+        important_match = re.search(
+            r"IMPORTANT\s*:\s*(yes|no)",
+            raw_text,
+            re.IGNORECASE
+        )
+
+        summary_match = re.search(
+            r"SUMMARY\s*:\s*(.*)",
+            raw_text,
+            re.IGNORECASE | re.DOTALL
+        )
+
+        is_important = False
+
+        if important_match:
+            is_important = (
+                important_match.group(1).lower() == "yes"
+            )
+
+        if emergency_match:
+            is_important = True
+
         summary = None
-        if "summary:" in result_text:
-            # استخراج خلاصه
-            parts = response.text.split("SUMMARY:")
-            if len(parts) > 1:
-                summary = parts[-1].strip()
-                # پاک کردن چیزهای اضافی
-                summary = summary.split("\n")[0].strip()
+
+        if summary_match:
+            summary = summary_match.group(1).strip()
 
         return {
             "is_important": is_important,
             "summary": summary if is_important else None
         }
+
     except Exception as e:
         print("AI Error:", e)
-        # در صورت خطا، اگر کلمات کلیدی حمله داشت، مهم حساب کن
-        danger_words = ["می‌زنن", "میزنن", "بمب", "انفجار", "پدافند", "موشک", "پهپاد", "حمله", "آژیر"]
-        if any(word in user_text for word in danger_words):
+
+        if emergency_match:
             return {
                 "is_important": True,
                 "summary": f"گزارش فوری: {user_text}"
             }
-        return {"is_important": False, "summary": None}
+
+        return {
+            "is_important": False,
+            "summary": None
+        }
