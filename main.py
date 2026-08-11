@@ -1,8 +1,8 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.filters import CommandStart, Command
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import CommandStart
 from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -13,16 +13,17 @@ from database import init_db, save_ticket
 from ai_handler import analyze_news
 
 logging.basicConfig(level=logging.INFO)
-
 storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
-
 pending_tickets = {}
 
 # ==================== States ====================
 class ReportState(StatesGroup):
     waiting_for_report = State()
+
+class ReplyState(StatesGroup):
+    waiting_for_reply = State()
 
 # ==================== Keyboards ====================
 def user_main_keyboard():
@@ -56,15 +57,15 @@ def cancel_keyboard():
 @dp.message(CommandStart())
 async def start_handler(message: Message, state: FSMContext):
     await state.clear()
-    
+   
     is_admin = message.from_user.id in ADMIN_IDS
-    
+   
     welcome_text = (
         "سلام 👋\n\n"
         "به ربات پشتیبانی نیوز پلاس خوش اومدید.\n"
         "از دکمه‌های زیر استفاده کنید:"
     )
-    
+   
     if is_admin:
         await message.answer(welcome_text, reply_markup=admin_main_keyboard())
     else:
@@ -86,7 +87,7 @@ async def help_handler(message: Message):
 async def new_report_handler(message: Message, state: FSMContext):
     await state.set_state(ReportState.waiting_for_report)
     await message.answer(
-        "لطفاً جزئیات تیکت  خود را ارسال کنید:\n"
+        "لطفاً جزئیات تیکت خود را ارسال کنید:\n"
         "(می‌توانید عکس یا فیلم هم بفرستید)\n\n"
         "برای انصراف روی دکمه «انصراف» بزنید.",
         reply_markup=cancel_keyboard()
@@ -147,11 +148,14 @@ async def process_report(message: Message, state: FSMContext):
         "is_important": is_important
     }
 
-    # دکمه‌های تأیید/رد برای ادمین
+    # دکمه‌های تأیید / رد / پاسخ
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ تأیید و انتشار", callback_data=f"approve_{ticket_id}"),
             InlineKeyboardButton(text="❌ رد کردن", callback_data=f"reject_{ticket_id}")
+        ],
+        [
+            InlineKeyboardButton(text="💬 پاسخ به کاربر", callback_data=f"reply_{ticket_id}")
         ]
     ])
 
@@ -177,14 +181,14 @@ async def process_report(message: Message, state: FSMContext):
 
     is_admin = user.id in ADMIN_IDS
     main_kb = admin_main_keyboard() if is_admin else user_main_keyboard()
-    
+   
     await message.answer(
         f"✅ تیکت شما با شماره #{ticket_id} ثبت شد و برای بررسی ارسال گردید.",
         reply_markup=main_kb
     )
     await state.clear()
 
-# ==================== وضعیت تیکت‌ها (ساده) ====================
+# ==================== وضعیت تیکت‌ها ====================
 @dp.message(F.text == "📋 وضعیت تیکت‌های من")
 async def my_tickets_handler(message: Message):
     await message.answer(
@@ -198,11 +202,11 @@ async def admin_panel(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("شما دسترسی ندارید.")
         return
-    
+   
     await message.answer(
         "⚙️ پنل ادمین\n\n"
         "تیکت‌های جدید به صورت خودکار به گروه ادمین ارسال می‌شوند.\n"
-        "از دکمه‌های تأیید / رد در گروه استفاده کنید."
+        "از دکمه‌های تأیید / رد / پاسخ در گروه استفاده کنید."
     )
 
 # ==================== دکمه‌های تأیید و رد ====================
@@ -231,7 +235,6 @@ async def approve_handler(callback: CallbackQuery):
         else:
             await bot.send_message(CHANNEL_ID, text=summary)
 
-        # آپدیت پیام ادمین
         new_text = (callback.message.caption or callback.message.text or "") + "\n\n✅ تأیید و منتشر شد"
         if callback.message.caption:
             await callback.message.edit_caption(caption=new_text, reply_markup=None)
@@ -275,13 +278,66 @@ async def reject_handler(callback: CallbackQuery):
     if ticket_id in pending_tickets:
         del pending_tickets[ticket_id]
 
-# ==================== پیام‌های معمولی (اگر کسی مستقیم پیام داد) ====================
+# ==================== پاسخ به کاربر ====================
+@dp.callback_query(F.data.startswith("reply_"))
+async def reply_start_handler(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("دسترسی ندارید", show_alert=True)
+        return
+
+    ticket_id = int(callback.data.split("_")[1])
+    ticket = pending_tickets.get(ticket_id)
+
+    if not ticket:
+        await callback.answer("تیکت منقضی شده", show_alert=True)
+        return
+
+    await state.set_state(ReplyState.waiting_for_reply)
+    await state.update_data(reply_ticket_id=ticket_id, reply_user_id=ticket["user_id"])
+
+    await callback.message.answer(
+        f"در حال پاسخ به تیکت #{ticket_id}\n\n"
+        f"پیام خود را بنویسید تا برای کاربر ارسال شود.\n"
+        f"برای لغو، /cancel را بفرستید."
+    )
+    await callback.answer()
+
+@dp.message(ReplyState.waiting_for_reply)
+async def process_admin_reply(message: Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    data = await state.get_data()
+    ticket_id = data.get("reply_ticket_id")
+    user_id = data.get("reply_user_id")
+
+    if not ticket_id or not user_id:
+        await state.clear()
+        return await message.answer("خطا رخ داد.")
+
+    try:
+        await bot.send_message(
+            user_id,
+            f"📩 پاسخ ادمین به تیکت #{ticket_id}:\n\n{message.text}"
+        )
+        await message.answer("✅ پیام شما با موفقیت برای کاربر ارسال شد.")
+    except Exception as e:
+        await message.answer(f"خطا در ارسال پیام به کاربر:\n{e}")
+
+    await state.clear()
+
+@dp.message(F.text == "/cancel")
+async def cancel_reply(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("پاسخ لغو شد.")
+
+# ==================== پیام‌های معمولی ====================
 @dp.message(F.content_type.in_({ContentType.TEXT, ContentType.PHOTO, ContentType.VIDEO}))
 async def fallback_handler(message: Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state == ReportState.waiting_for_report.state:
-        return  # قبلاً هندل شده
-    
+        return
+   
     await message.answer(
         "لطفاً از دکمه‌های منو استفاده کنید.\n"
         "برای شروع روی /start بزنید."
