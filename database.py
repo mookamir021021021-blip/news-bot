@@ -5,6 +5,7 @@ DB_NAME = "tickets.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
+        # جدول تیکت‌ها
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,6 +19,16 @@ async def init_db():
                 is_important INTEGER DEFAULT 0,
                 ai_summary TEXT,
                 status TEXT DEFAULT 'open',
+                created_at TEXT
+            )
+        """)
+        
+        # جدول کاربران (برای تنظیمات)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                custom_name TEXT,
+                username TEXT,
                 created_at TEXT
             )
         """)
@@ -56,3 +67,38 @@ async def update_ticket_status(ticket_id, status):
             (status, ticket_id)
         )
         await db.commit()
+
+async def get_or_create_user(user_id, username, full_name):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        user = await cursor.fetchone()
+        
+        if user:
+            return dict(user)
+        
+        await db.execute(
+            "INSERT INTO users (user_id, custom_name, username, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, full_name, username, datetime.now().isoformat())
+        )
+        await db.commit()
+        return {
+            "user_id": user_id,
+            "custom_name": full_name,
+            "username": username
+        }
+
+async def update_custom_name(user_id, new_name):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE users SET custom_name = ? WHERE user_id = ?",
+            (new_name, user_id)
+        )
+        await db.commit()
+
+async def get_user_profile(user_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        user = await cursor.fetchone()
+        return dict(user) if user else None
