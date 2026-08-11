@@ -9,7 +9,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, CHANNEL_ID, ADMIN_GROUP_ID, ADMIN_IDS
-from database import init_db, save_ticket, get_user_tickets, update_ticket_status
+from database import (
+    init_db, save_ticket, get_user_tickets, update_ticket_status,
+    get_or_create_user, update_custom_name, get_user_profile
+)
 from ai_handler import analyze_news
 
 logging.basicConfig(level=logging.INFO)
@@ -26,12 +29,16 @@ class ReportState(StatesGroup):
 class ReplyState(StatesGroup):
     waiting_for_reply = State()
 
+class SettingsState(StatesGroup):
+    waiting_for_name = State()
+
 # ==================== Keyboards ====================
 def user_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📝 ثبت تیکت جدید")],
-            [KeyboardButton(text="📋 وضعیت تیکت‌های من"), KeyboardButton(text="ℹ️ راهنما")],
+            [KeyboardButton(text="📋 وضعیت تیکت‌ها"), KeyboardButton(text="⚙️ تنظیمات")],
+            [KeyboardButton(text="ℹ️ راهنما")],
         ],
         resize_keyboard=True
     )
@@ -40,8 +47,18 @@ def admin_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📝 ثبت تیکت جدید")],
-            [KeyboardButton(text="📋 وضعیت تیکت‌های من"), KeyboardButton(text="ℹ️ راهنما")],
-            [KeyboardButton(text="⚙️ پنل ادمین")],
+            [KeyboardButton(text="📋 وضعیت تیکت‌ها"), KeyboardButton(text="⚙️ تنظیمات")],
+            [KeyboardButton(text="🛠️ پنل ادمین"), KeyboardButton(text="ℹ️ راهنما")],
+        ],
+        resize_keyboard=True
+    )
+
+def settings_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✏️ تغییر نام")],
+            [KeyboardButton(text="👤 پروفایل من")],
+            [KeyboardButton(text="🔙 بازگشت به منو")],
         ],
         resize_keyboard=True
     )
@@ -56,10 +73,13 @@ def cancel_keyboard():
 @dp.message(CommandStart())
 async def start_handler(message: Message, state: FSMContext):
     await state.clear()
-    is_admin = message.from_user.id in ADMIN_IDS
+    user = message.from_user
+    await get_or_create_user(user.id, user.username, user.full_name)
+    
+    is_admin = user.id in ADMIN_IDS
     welcome_text = (
-        "سلام 👋\n\n"
-        "به ربات پشتیبانی نیوز پلاس خوش اومدید.\n"
+        f"سلام {user.first_name} 👋\n\n"
+        "به ربات پشتیبانی **نیوز پلاس** خوش اومدید.\n"
         "از دکمه‌های زیر استفاده کنید:"
     )
     keyboard = admin_main_keyboard() if is_admin else user_main_keyboard()
@@ -69,23 +89,87 @@ async def start_handler(message: Message, state: FSMContext):
 @dp.message(F.text == "ℹ️ راهنما")
 async def help_handler(message: Message):
     text = (
-        "📖 راهنمای استفاده از ربات:\n\n"
-        "۱. روی دکمه «ثبت تیکت جدید» بزنید\n"
-        "۲. عنوان تیکت را بنویسید\n"
-        "۳. توضیحات + عکس یا فیلم را ارسال کنید\n"
-        "۴. تیکت شما بررسی می‌شود"
+        "📖 *راهنمای ربات*\n\n"
+        "🔸 *ثبت تیکت جدید*\n"
+        "اول عنوان، بعد توضیحات و عکس/فیلم بفرستید.\n\n"
+        "🔸 *وضعیت تیکت‌ها*\n"
+        "لیست تیکت‌های قبلی شما را می‌بینید.\n\n"
+        "🔸 *تنظیمات*\n"
+        "می‌توانید نام نمایشی خود را تغییر دهید."
     )
-    await message.answer(text)
+    await message.answer(text, parse_mode="Markdown")
+
+# ==================== تنظیمات ====================
+@dp.message(F.text == "⚙️ تنظیمات")
+async def settings_handler(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "⚙️ *تنظیمات حساب کاربری*\n\nیکی از گزینه‌ها را انتخاب کنید:",
+        reply_markup=settings_keyboard(),
+        parse_mode="Markdown"
+    )
+
+@dp.message(F.text == "🔙 بازگشت به منو")
+async def back_to_main(message: Message, state: FSMContext):
+    await state.clear()
+    is_admin = message.from_user.id in ADMIN_IDS
+    keyboard = admin_main_keyboard() if is_admin else user_main_keyboard()
+    await message.answer("به منوی اصلی بازگشتید.", reply_markup=keyboard)
+
+@dp.message(F.text == "👤 پروفایل من")
+async def profile_handler(message: Message):
+    profile = await get_user_profile(message.from_user.id)
+    if not profile:
+        await message.answer("پروفایلی یافت نشد.")
+        return
+    
+    text = (
+        f"👤 *پروفایل شما*\n\n"
+        f"🆔 آیدی: `{profile['user_id']}`\n"
+        f"📝 نام نمایشی: {profile['custom_name'] or 'ثبت نشده'}\n"
+        f"👤 یوزرنیم: @{profile['username'] or 'ندارد'}"
+    )
+    await message.answer(text, parse_mode="Markdown")
+
+@dp.message(F.text == "✏️ تغییر نام")
+async def change_name_start(message: Message, state: FSMContext):
+    await state.set_state(SettingsState.waiting_for_name)
+    await message.answer(
+        "نام جدید خود را بنویسید:\n\n"
+        "برای انصراف روی «❌ انصراف» بزنید.",
+        reply_markup=cancel_keyboard()
+    )
+
+@dp.message(SettingsState.waiting_for_name, F.text)
+async def process_new_name(message: Message, state: FSMContext):
+    if message.text == "❌ انصراف":
+        await state.clear()
+        await message.answer("لغو شد.", reply_markup=settings_keyboard())
+        return
+
+    new_name = message.text.strip()
+    if len(new_name) < 2 or len(new_name) > 40:
+        await message.answer("نام باید بین ۲ تا ۴۰ حرف باشد. دوباره بنویسید:")
+        return
+
+    await update_custom_name(message.from_user.id, new_name)
+    await state.clear()
+    await message.answer(
+        f"✅ نام شما به **{new_name}** تغییر کرد.",
+        reply_markup=settings_keyboard(),
+        parse_mode="Markdown"
+    )
 
 # ==================== ثبت تیکت جدید ====================
 @dp.message(F.text == "📝 ثبت تیکت جدید")
 async def new_report_handler(message: Message, state: FSMContext):
     await state.set_state(ReportState.waiting_for_title)
     await message.answer(
-        "لطفاً **عنوان تیکت** را بنویسید:\n\n"
-        "مثال: انفجار در تهران / صدای پدافند / گزارش فوری\n\n"
+        "لطفاً *عنوان تیکت* را بنویسید:\n\n"
+        "مثال: انفجار در تهران / صدای پدافند\n\n"
         "برای انصراف روی «❌ انصراف» بزنید.",
-        reply_markup=cancel_keyboard()
+        reply_markup=cancel_keyboard(),
+        parse_mode="Markdown"
     )
 
 @dp.message(F.text == "❌ انصراف")
@@ -95,7 +179,6 @@ async def cancel_handler(message: Message, state: FSMContext):
     keyboard = admin_main_keyboard() if is_admin else user_main_keyboard()
     await message.answer("عملیات لغو شد.", reply_markup=keyboard)
 
-# دریافت عنوان
 @dp.message(ReportState.waiting_for_title, F.text)
 async def process_title(message: Message, state: FSMContext):
     title = message.text.strip()
@@ -106,12 +189,12 @@ async def process_title(message: Message, state: FSMContext):
     await state.update_data(title=title)
     await state.set_state(ReportState.waiting_for_report)
     await message.answer(
-        f"عنوان ثبت شد: **{title}**\n\n"
+        f"عنوان ثبت شد: *{title}*\n\n"
         "حالا توضیحات تیکت را ارسال کنید (متن، عکس یا فیلم):",
-        reply_markup=cancel_keyboard()
+        reply_markup=cancel_keyboard(),
+        parse_mode="Markdown"
     )
 
-# دریافت محتوا
 @dp.message(ReportState.waiting_for_report, F.content_type.in_({
     ContentType.TEXT, ContentType.PHOTO, ContentType.VIDEO, ContentType.DOCUMENT
 }))
@@ -136,6 +219,9 @@ async def process_report(message: Message, state: FSMContext):
 
     await message.answer("در حال بررسی تیکت شما...")
 
+    profile = await get_user_profile(user.id)
+    display_name = profile["custom_name"] if profile and profile["custom_name"] else user.full_name
+
     has_media = file_id is not None
     ai_result = await analyze_news(f"{title}\n{text}", has_media=has_media)
     is_important = ai_result["is_important"]
@@ -144,7 +230,7 @@ async def process_report(message: Message, state: FSMContext):
     ticket_id = await save_ticket(
         user_id=user.id,
         username=user.username,
-        full_name=user.full_name,
+        full_name=display_name,
         title=title,
         content_type=content_type,
         text_content=text,
@@ -155,7 +241,7 @@ async def process_report(message: Message, state: FSMContext):
 
     pending_tickets[ticket_id] = {
         "user_id": user.id,
-        "full_name": user.full_name,
+        "full_name": display_name,
         "title": title,
         "text": text,
         "file_id": file_id,
@@ -177,7 +263,7 @@ async def process_report(message: Message, state: FSMContext):
     admin_text = (
         f"🎫 تیکت جدید #{ticket_id}\n\n"
         f"📌 عنوان: {title}\n"
-        f"👤 {user.full_name}\n"
+        f"👤 {display_name}\n"
         f"🆔 `{user.id}`\n"
         f"🔍 تشخیص AI: {'مهم ✅' if is_important else 'غیرمهم ❌'}\n\n"
         f"📝 توضیحات:\n{text or '(بدون متن)'}"
@@ -199,13 +285,14 @@ async def process_report(message: Message, state: FSMContext):
     main_kb = admin_main_keyboard() if is_admin else user_main_keyboard()
    
     await message.answer(
-        f"✅ تیکت شما با شماره #{ticket_id} ثبت شد.\nعنوان: {title}",
-        reply_markup=main_kb
+        f"✅ تیکت شما با شماره *#{ticket_id}* ثبت شد.\nعنوان: {title}",
+        reply_markup=main_kb,
+        parse_mode="Markdown"
     )
     await state.clear()
 
-# ==================== وضعیت تیکت‌های من ====================
-@dp.message(F.text == "📋 وضعیت تیکت‌های من")
+# ==================== وضعیت تیکت‌ها ====================
+@dp.message(F.text == "📋 وضعیت تیکت‌ها")
 async def my_tickets_handler(message: Message):
     tickets = await get_user_tickets(message.from_user.id)
 
@@ -213,25 +300,26 @@ async def my_tickets_handler(message: Message):
         await message.answer("شما هنوز هیچ تیکتی ثبت نکرده‌اید.")
         return
 
-    text = "📋 آخرین تیکت‌های شما:\n\n"
+    text = "📋 *آخرین تیکت‌های شما:*\n\n"
     for t in tickets:
-        status_emoji = "🟢 باز" if t["status"] == "open" else "🔴 بسته"
+        status = "🟢 باز" if t["status"] == "open" else "🔴 بسته"
         important = " ⭐" if t["is_important"] else ""
-        text += f"#{t['id']} | {t['title'] or 'بدون عنوان'}{important}\nوضعیت: {status_emoji}\n\n"
+        text += f"*#{t['id']}* | {t['title'] or 'بدون عنوان'}{important}\nوضعیت: {status}\n\n"
 
-    await message.answer(text)
+    await message.answer(text, parse_mode="Markdown")
 
 # ==================== پنل ادمین ====================
-@dp.message(F.text == "⚙️ پنل ادمین")
+@dp.message(F.text == "🛠️ پنل ادمین")
 async def admin_panel(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("شما دسترسی ندارید.")
         return
    
     await message.answer(
-        "⚙️ پنل ادمین\n\n"
+        "🛠️ *پنل ادمین*\n\n"
         "تیکت‌های جدید به گروه ادمین ارسال می‌شوند.\n"
-        "از دکمه‌های تأیید / رد / پاسخ استفاده کنید."
+        "از دکمه‌های تأیید / رد / پاسخ استفاده کنید.",
+        parse_mode="Markdown"
     )
 
 # ==================== دکمه‌های ادمین ====================
@@ -346,7 +434,11 @@ async def cancel_reply(message: Message, state: FSMContext):
 @dp.message(F.content_type.in_({ContentType.TEXT, ContentType.PHOTO, ContentType.VIDEO}))
 async def fallback_handler(message: Message, state: FSMContext):
     current_state = await state.get_state()
-    if current_state in [ReportState.waiting_for_title.state, ReportState.waiting_for_report.state]:
+    if current_state in [
+        ReportState.waiting_for_title.state, 
+        ReportState.waiting_for_report.state,
+        SettingsState.waiting_for_name.state
+    ]:
         return
     await message.answer("لطفاً از دکمه‌های منو استفاده کنید.\nبرای شروع /start بزنید.")
 
