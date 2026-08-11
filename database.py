@@ -11,6 +11,7 @@ async def init_db():
                 user_id INTEGER,
                 username TEXT,
                 full_name TEXT,
+                title TEXT,
                 content_type TEXT,
                 text_content TEXT,
                 file_id TEXT,
@@ -22,15 +23,28 @@ async def init_db():
         """)
         await db.commit()
 
-async def save_ticket(user_id, username, full_name, content_type, text_content, file_id, is_important, ai_summary):
+async def save_ticket(user_id, username, full_name, title, content_type, text_content, file_id, is_important, ai_summary):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("""
             INSERT INTO tickets 
-            (user_id, username, full_name, content_type, text_content, file_id, is_important, ai_summary, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, username, full_name, title, content_type, text_content, file_id, is_important, ai_summary, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            user_id, username, full_name, content_type, text_content, file_id,
+            user_id, username, full_name, title, content_type, text_content, file_id,
             1 if is_important else 0, ai_summary, datetime.now().isoformat()
         ))
         await db.commit()
         return cursor.lastrowid
+
+async def get_user_tickets(user_id, limit=10):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT id, title, status, is_important, created_at 
+            FROM tickets 
+            WHERE user_id = ? 
+            ORDER BY id DESC 
+            LIMIT ?
+        """, (user_id, limit))
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
