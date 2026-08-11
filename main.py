@@ -87,7 +87,7 @@ async def new_report_handler(message: Message, state: FSMContext):
     await state.set_state(ReportState.waiting_for_report)
     await message.answer(
         "لطفاً جزئیات تیکت  خود را ارسال کنید:\n"
-        "(می‌توانید عکس یا فیلم بفرستید)\n\n"
+        "(می‌توانید عکس یا فیلم هم بفرستید)\n\n"
         "برای انصراف روی دکمه «انصراف» بزنید.",
         reply_markup=cancel_keyboard()
     )
