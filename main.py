@@ -428,7 +428,7 @@ async def process_admin_reply(message: Message, state: FSMContext):
         return await message.answer("خطا رخ داد.")
 
     try:
-        await bot.send_message(user_id, f"📩 پاسخ ادمین به تيكت #{ticket_id}:\n\n{message.text}")
+        await bot.send_message(user_id, f"📩 پاسخ ادمین به تیکت #{ticket_id}:\n\n{message.text}")
         await message.answer("✅ پیام برای کاربر ارسال شد.")
     except Exception as e:
         await message.answer(f"خطا در ارسال: {e}")
