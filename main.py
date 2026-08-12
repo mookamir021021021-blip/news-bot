@@ -23,7 +23,6 @@ pending_tickets = {}
 
 # ==================== States ====================
 class ReportState(StatesGroup):
-    waiting_for_title = State()
     waiting_for_report = State()
 
 class ReplyState(StatesGroup):
@@ -90,7 +89,7 @@ async def help_handler(message: Message):
     text = (
         "📖 *راهنمای ربات*\n\n"
         "🔸 *ثبت تیکت جدید*\n"
-        "عنوان + توضیحات + عکس یا فیلم\n\n"
+        "مستقیم گزارش خود را ارسال کنید (متن، عکس یا فیلم)\n\n"
         "🔸 *وضعیت تیکت‌ها*\n"
         "لیست تیکت‌ها (پاسخ پشتیبانی با 🟢 نشون داده می‌شود)\n\n"
         "🔸 *تنظیمات*\n"
@@ -101,48 +100,26 @@ async def help_handler(message: Message):
 # ==================== ثبت تیکت جدید ====================
 @dp.message(F.text == "📝 ثبت تیکت جدید")
 async def new_report_handler(message: Message, state: FSMContext):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📝 ارسال گزارش", callback_data="new_report")
-        ]
-    ])
-    await message.answer("📝 *ثبت تیکت جدید*\n\nیکی از گزینه‌های زیر را انتخاب کنید:", 
-                         reply_markup=keyboard, parse_mode="Markdown")
-
-@dp.callback_query(F.data == "new_report")
-async def new_report_confirm(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(ReportState.waiting_for_title)
-    await callback.message.answer(
-        "لطفاً *عنوان تیکت* را بنویسید:\n\nمثال: انفجار در تهران / صدای پدافند\n\nبرای انصراف روی «❌ انصراف» بزنید.",
-        reply_markup=cancel_keyboard(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-# ==================== ثبت تیکت جدید (ارسال گزارش) ====================
-@dp.message(ReportState.waiting_for_title, F.text)
-async def process_title(message: Message, state: FSMContext):
-    title = message.text.strip()
-    if len(title) < 3:
-        await message.answer("عنوان خیلی کوتاه است. لطفاً عنوان بهتری بنویسید:")
-        return
-
-    await state.update_data(title=title)
     await state.set_state(ReportState.waiting_for_report)
     await message.answer(
-        f"عنوان ثبت شد: *{title}*\n\n"
-        "حالا توضیحات تیکت را ارسال کنید (متن، عکس یا فیلم):",
+        "📝 *ثبت تیکت جدید*\n\n"
+        "مستقیم گزارش خود را ارسال کنید (متن، عکس یا فیلم).\n"
+        "برای انصراف روی «❌ انصراف» بزنید.",
         reply_markup=cancel_keyboard(),
         parse_mode="Markdown"
     )
+
+@dp.message(F.text == "❌ انصراف")
+async def cancel_handler(message: Message, state: FSMContext):
+    await state.clear()
+    is_admin = message.from_user.id in ADMIN_IDS
+    keyboard = admin_main_keyboard() if is_admin else user_main_keyboard()
+    await message.answer("عملیات لغو شد.", reply_markup=keyboard)
 
 @dp.message(ReportState.waiting_for_report, F.content_type.in_({
     ContentType.TEXT, ContentType.PHOTO, ContentType.VIDEO, ContentType.DOCUMENT
 }))
 async def process_report(message: Message, state: FSMContext):
-    data = await state.get_data()
-    title = data.get("title", "بدون عنوان")
-
     user = message.from_user
     text = message.text or message.caption or ""
     content_type = message.content_type
@@ -164,7 +141,7 @@ async def process_report(message: Message, state: FSMContext):
     display_name = profile["custom_name"] if profile and profile["custom_name"] else user.full_name
 
     has_media = file_id is not None
-    ai_result = await analyze_news(f"{title}\n{text}", has_media=has_media)
+    ai_result = await analyze_news(text, has_media=has_media)
     is_important = ai_result["is_important"]
     summary = ai_result["summary"]
 
@@ -172,7 +149,7 @@ async def process_report(message: Message, state: FSMContext):
         user_id=user.id,
         username=user.username,
         full_name=display_name,
-        title=title,
+        title="بدون عنوان",
         content_type=content_type,
         text_content=text,
         file_id=file_id,
@@ -183,7 +160,7 @@ async def process_report(message: Message, state: FSMContext):
     pending_tickets[ticket_id] = {
         "user_id": user.id,
         "full_name": display_name,
-        "title": title,
+        "title": "بدون عنوان",
         "text": text,
         "file_id": file_id,
         "content_type": content_type,
@@ -203,11 +180,10 @@ async def process_report(message: Message, state: FSMContext):
 
     admin_text = (
         f"🎫 تیکت جدید #{ticket_id}\n\n"
-        f"📌 عنوان: {title}\n"
         f"👤 {display_name}\n"
         f"🆔 `{user.id}`\n"
         f"🔍 تشخیص AI: {'مهم ✅' if is_important else 'غیرمهم ❌'}\n\n"
-        f"📝 توضیحات:\n{text or '(بدون متن)'}"
+        f"📝 متن:\n{text or '(بدون متن)'}"
     )
     if summary:
         admin_text += f"\n\n🤖 پیشنهاد کپشن:\n{summary}"
@@ -226,7 +202,7 @@ async def process_report(message: Message, state: FSMContext):
     main_kb = admin_main_keyboard() if is_admin else user_main_keyboard()
    
     await message.answer(
-        f"✅ تیکت شما با شماره *#{ticket_id}* ثبت شد.\nعنوان: {title}",
+        f"✅ تیکت شما با شماره *#{ticket_id}* ثبت شد.",
         reply_markup=main_kb,
         parse_mode="Markdown"
     )
