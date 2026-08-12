@@ -92,7 +92,7 @@ async def help_handler(message: Message):
         "🔸 *ثبت تیکت جدید*\n"
         "عنوان + توضیحات + عکس یا فیلم\n\n"
         "🔸 *ارتباط با پشتیبانی*\n"
-        "مستقیم پیام بده (پاسخ‌ها مستقیم توی وضعیت تیکت‌ها نمایش داده می‌شود)\n\n"
+        "مستقیم پیام بده (پاسخ‌ها توی وضعیت تیکت‌ها نمایش داده می‌شود)\n\n"
         "🔸 *وضعیت تیکت‌ها*\n"
         "لیست تیکت‌ها (اگر پشتیبانی پاسخ بده، با 🟢 نشون داده می‌شود)\n\n"
         "🔸 *تنظیمات*\n"
@@ -100,7 +100,7 @@ async def help_handler(message: Message):
     )
     await message.answer(text, parse_mode="Markdown")
 
-# ==================== ثبت تیکت جدید ====================
+# ==================== ارتباط با پشتیبانی ====================
 @dp.message(F.text == "📝 ثبت تیکت جدید")
 async def new_report_handler(message: Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -130,6 +130,119 @@ async def new_support_confirm(callback: CallbackQuery, state: FSMContext):
         parse_mode="Markdown"
     )
     await callback.answer()
+
+# ==================== ثبت تیکت جدید (ارسال گزارش) ====================
+@dp.message(ReportState.waiting_for_title, F.text)
+async def process_title(message: Message, state: FSMContext):
+    title = message.text.strip()
+    if len(title) < 3:
+        await message.answer("عنوان خیلی کوتاه است. لطفاً عنوان بهتری بنویسید:")
+        return
+
+    await state.update_data(title=title)
+    await state.set_state(ReportState.waiting_for_report)
+    await message.answer(
+        f"عنوان ثبت شد: *{title}*\n\n"
+        "حالا توضیحات تیکت را ارسال کنید (متن، عکس یا فیلم):",
+        reply_markup=cancel_keyboard(),
+        parse_mode="Markdown"
+    )
+
+@dp.message(ReportState.waiting_for_report, F.content_type.in_({
+    ContentType.TEXT, ContentType.PHOTO, ContentType.VIDEO, ContentType.DOCUMENT
+}))
+async def process_report(message: Message, state: FSMContext):
+    data = await state.get_data()
+    title = data.get("title", "بدون عنوان")
+
+    user = message.from_user
+    text = message.text or message.caption or ""
+    content_type = message.content_type
+    file_id = None
+
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        content_type = "photo"
+    elif message.video:
+        file_id = message.video.file_id
+        content_type = "video"
+    elif message.document:
+        file_id = message.document.file_id
+        content_type = "document"
+
+    await message.answer("در حال بررسی تیکت شما...")
+
+    profile = await get_user_profile(user.id)
+    display_name = profile["custom_name"] if profile and profile["custom_name"] else user.full_name
+
+    has_media = file_id is not None
+    ai_result = await analyze_news(f"{title}\n{text}", has_media=has_media)
+    is_important = ai_result["is_important"]
+    summary = ai_result["summary"]
+
+    ticket_id = await save_ticket(
+        user_id=user.id,
+        username=user.username,
+        full_name=display_name,
+        title=title,
+        content_type=content_type,
+        text_content=text,
+        file_id=file_id,
+        is_important=is_important,
+        ai_summary=summary
+    )
+
+    pending_tickets[ticket_id] = {
+        "user_id": user.id,
+        "full_name": display_name,
+        "title": title,
+        "text": text,
+        "file_id": file_id,
+        "content_type": content_type,
+        "summary": summary,
+        "is_important": is_important
+    }
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ تأیید و انتشار", callback_data=f"approve_{ticket_id}"),
+            InlineKeyboardButton(text="❌ رد کردن", callback_data=f"reject_{ticket_id}")
+        ],
+        [
+            InlineKeyboardButton(text="💬 پاسخ به کاربر", callback_data=f"reply_{ticket_id}")
+        ]
+    ])
+
+    admin_text = (
+        f"🎫 تیکت جدید #{ticket_id}\n\n"
+        f"📌 عنوان: {title}\n"
+        f"👤 {display_name}\n"
+        f"🆔 `{user.id}`\n"
+        f"🔍 تشخیص AI: {'مهم ✅' if is_important else 'غیرمهم ❌'}\n\n"
+        f"📝 توضیحات:\n{text or '(بدون متن)'}"
+    )
+    if summary:
+        admin_text += f"\n\n🤖 پیشنهاد کپشن:\n{summary}"
+
+    try:
+        if file_id and content_type == "photo":
+            await bot.send_photo(ADMIN_GROUP_ID, photo=file_id, caption=admin_text, reply_markup=keyboard)
+        elif file_id and content_type == "video":
+            await bot.send_video(ADMIN_GROUP_ID, video=file_id, caption=admin_text, reply_markup=keyboard)
+        else:
+            await bot.send_message(ADMIN_GROUP_ID, admin_text, reply_markup=keyboard)
+    except Exception as e:
+        print("Admin error:", e)
+
+    is_admin = user.id in ADMIN_IDS
+    main_kb = admin_main_keyboard() if is_admin else user_main_keyboard()
+   
+    await message.answer(
+        f"✅ تیکت شما با شماره *#{ticket_id}* ثبت شد.\nعنوان: {title}",
+        reply_markup=main_kb,
+        parse_mode="Markdown"
+    )
+    await state.clear()
 
 # ==================== وضعیت تیکت‌ها ====================
 @dp.message(F.text == "📋 وضعیت تیکت‌ها")
@@ -315,7 +428,7 @@ async def process_admin_reply(message: Message, state: FSMContext):
         return await message.answer("خطا رخ داد.")
 
     try:
-        await bot.send_message(user_id, f"📩 پاسخ ادمین به تیکت #{ticket_id}:\n\n{message.text}")
+        await bot.send_message(user_id, f"📩 پاسخ ادمین به تيكت #{ticket_id}:\n\n{message.text}")
         await message.answer("✅ پیام برای کاربر ارسال شد.")
     except Exception as e:
         await message.answer(f"خطا در ارسال: {e}")
