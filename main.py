@@ -91,25 +91,22 @@ async def help_handler(message: Message):
         "📖 *راهنمای ربات*\n\n"
         "🔸 *ثبت تیکت جدید*\n"
         "عنوان + توضیحات + عکس یا فیلم\n\n"
-        "🔸 *ارتباط با پشتیبانی*\n"
-        "مستقیم پیام بده (پاسخ‌ها توی وضعیت تیکت‌ها نمایش داده می‌شود)\n\n"
         "🔸 *وضعیت تیکت‌ها*\n"
-        "لیست تیکت‌ها (اگر پشتیبانی پاسخ بده، با 🟢 نشون داده می‌شود)\n\n"
+        "لیست تیکت‌ها (پاسخ پشتیبانی با 🟢 نشون داده می‌شود)\n\n"
         "🔸 *تنظیمات*\n"
         "تغییر نام نمایشی"
     )
     await message.answer(text, parse_mode="Markdown")
 
-# ==================== ارتباط با پشتیبانی ====================
+# ==================== ثبت تیکت جدید ====================
 @dp.message(F.text == "📝 ثبت تیکت جدید")
 async def new_report_handler(message: Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📝 ارسال گزارش", callback_data="new_report"),
-            InlineKeyboardButton(text="💬 ارتباط با پشتیبانی", callback_data="new_support")
+            InlineKeyboardButton(text="📝 ارسال گزارش", callback_data="new_report")
         ]
     ])
-    await message.answer("📝 *ثبت تیکت جدید*\n\nیکی از دو گزینه زیر را انتخاب کنید:", 
+    await message.answer("📝 *ثبت تیکت جدید*\n\nیکی از گزینه‌های زیر را انتخاب کنید:", 
                          reply_markup=keyboard, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "new_report")
@@ -118,15 +115,6 @@ async def new_report_confirm(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "لطفاً *عنوان تیکت* را بنویسید:\n\nمثال: انفجار در تهران / صدای پدافند\n\nبرای انصراف روی «❌ انصراف» بزنید.",
         reply_markup=cancel_keyboard(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data == "new_support")
-async def new_support_confirm(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.answer(
-        "💬 *ارتباط با پشتیبانی*\n\nسلام! هر سوالی داشتید بنویسید.\nپاسخ‌ها مستقیم توی **وضعیت تیکت‌ها** نمایش داده می‌شود.",
         parse_mode="Markdown"
     )
     await callback.answer()
