@@ -5,7 +5,6 @@ DB_NAME = "tickets.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        # جدول تیکت‌ها
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,8 +21,6 @@ async def init_db():
                 created_at TEXT
             )
         """)
-        
-        # جدول کاربران (برای تنظیمات)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -52,20 +49,14 @@ async def get_user_tickets(user_id, limit=10):
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
             SELECT id, title, status, is_important, created_at 
-            FROM tickets 
-            WHERE user_id = ? 
-            ORDER BY id DESC 
-            LIMIT ?
+            FROM tickets WHERE user_id = ? ORDER BY id DESC LIMIT ?
         """, (user_id, limit))
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
 async def update_ticket_status(ticket_id, status):
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "UPDATE tickets SET status = ? WHERE id = ?",
-            (status, ticket_id)
-        )
+        await db.execute("UPDATE tickets SET status = ? WHERE id = ?", (status, ticket_id))
         await db.commit()
 
 async def get_or_create_user(user_id, username, full_name):
@@ -73,10 +64,8 @@ async def get_or_create_user(user_id, username, full_name):
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
         user = await cursor.fetchone()
-        
         if user:
             return dict(user)
-        
         await db.execute(
             "INSERT INTO users (user_id, custom_name, username, created_at) VALUES (?, ?, ?, ?)",
             (user_id, full_name, username, datetime.now().isoformat())
@@ -90,10 +79,7 @@ async def get_or_create_user(user_id, username, full_name):
 
 async def update_custom_name(user_id, new_name):
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "UPDATE users SET custom_name = ? WHERE user_id = ?",
-            (new_name, user_id)
-        )
+        await db.execute("UPDATE users SET custom_name = ? WHERE user_id = ?", (new_name, user_id))
         await db.commit()
 
 async def get_user_profile(user_id):
